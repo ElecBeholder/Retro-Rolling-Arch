@@ -42,6 +42,22 @@ RETRO_BEGIN_DECLS
 #define GL_CORE_NUM_VBOS 256
 #define GL_CORE_NUM_FENCES 8
 
+#define GL_CORE_ROT_NORM 0
+#define GL_CORE_ROT_90 1
+#define GL_CORE_ROT_180 2
+#define GL_CORE_ROT_270 3
+#define R_X new_X_value
+#define R_Y new_Y_value
+#define R_WIDTH new_WIDTH_value
+#define R_HEIGHT new_HEIGHT_value
+/* rotate the rectangle shaped coordinates in code
+ * according to video driver orientation */
+#define GL_REORIENTATE(x,y,w,h,vw,vh,r,code) {int R_X=(x), R_Y=(y); unsigned int R_WIDTH=(w), R_HEIGHT=(h); \
+      switch (r){ \
+         case GL_CORE_ROT_90: R_X=(y); R_Y=(vw)-(x)-(w); R_WIDTH=(h); R_HEIGHT=(w); break; \
+         case GL_CORE_ROT_180: R_X=(vw)-(x)-(w); R_Y=(vh)-(y)-(h); R_WIDTH=(w); R_HEIGHT=(h); break; \
+         case GL_CORE_ROT_270: R_X=(vh)-(y)-(h); R_Y=(x); R_WIDTH=(h); R_HEIGHT=(w); break;} (code);}
+
 enum gl3_flags
 {
    GL3_FLAG_PBO_READBACK_ENABLE    = (1 <<  0),
@@ -117,6 +133,7 @@ typedef struct gl3
    unsigned vp_out_width;
    unsigned vp_out_height;
    unsigned rotation;
+   unsigned orientation;
    unsigned textures_index;
    unsigned scratch_vbo_index;
    unsigned fence_count;

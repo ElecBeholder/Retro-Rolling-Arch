@@ -54,7 +54,7 @@ struct gl3_filter_chain_pass_info
 
    float scale_x;
    float scale_y;
-   /* Ignored for the last pass, swapchain info 
+   /* Ignored for the last pass, swapchain info
     * will be used instead. */
    GLenum rt_format;
    /* For the last pass, make sure VIEWPORT scale
@@ -116,6 +116,10 @@ void gl3_filter_chain_set_frame_direction(
 void gl3_filter_chain_set_rotation(
       gl3_filter_chain_t *chain,
       uint32_t rotation);
+
+void gl3_filter_chain_set_videodriver_orientation(
+      gl3_filter_chain_t *chain,
+      uint32_t orientation);
 
 void gl3_filter_chain_set_pass_name(
       gl3_filter_chain_t *chain,

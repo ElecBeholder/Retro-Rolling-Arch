@@ -231,7 +231,10 @@ static void gfx_display_gl3_draw(gfx_display_ctx_draw_t *draw,
    if (!color)
       color           = &gl3_colors[0];
 
-   glViewport(draw->x, draw->y, draw->width, draw->height);
+   GL_REORIENTATE
+   (draw->x, draw->y, draw->width, draw->height, video_width, video_height, gl->orientation, {
+      glViewport(R_X, R_Y, R_WIDTH, R_HEIGHT);
+   });
 
    glActiveTexture(GL_TEXTURE1);
    glBindTexture(GL_TEXTURE_2D, texture);
@@ -360,7 +363,11 @@ static void gfx_display_gl3_scissor_begin(void *data,
       unsigned video_height,
       int x, int y, unsigned width, unsigned height)
 {
-   glScissor(x, video_height - y - height, width, height);
+   gl3_t *gl = (gl3_t*)data;
+   GL_REORIENTATE
+   (x, video_height-y-height, width, height, video_width, video_height, gl->orientation, {
+      glScissor(R_X, R_Y, R_WIDTH, R_HEIGHT);
+   });
    glEnable(GL_SCISSOR_TEST);
 }
 
@@ -1067,7 +1074,10 @@ static void gl3_render_overlay(gl3_t *gl,
    glBlendEquation(GL_FUNC_ADD);
 
    if (gl->flags & GL3_FLAG_OVERLAY_FULLSCREEN)
-      glViewport(0, 0, width, height);
+      GL_REORIENTATE
+      (0, 0, width, height, gl->video_width, gl->video_height, gl->orientation, {
+         glViewport(R_X, R_Y, R_WIDTH, R_HEIGHT);
+      });
 
    /* Ensure that we reset the attrib array. */
    glUseProgram(gl->pipelines.alpha_blend);
@@ -1105,7 +1115,10 @@ static void gl3_render_overlay(gl3_t *gl,
    glDisable(GL_BLEND);
    glBindTexture(GL_TEXTURE_2D, 0);
    if (gl->flags & GL3_FLAG_OVERLAY_FULLSCREEN)
-      glViewport(gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height);
+      GL_REORIENTATE
+      (gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height, gl->video_width, gl->video_height, gl->orientation, {
+         glViewport(R_X, R_Y, R_WIDTH, R_HEIGHT);
+      });
 }
 #endif
 
@@ -1352,7 +1365,10 @@ static void gl3_set_projection(gl3_t *gl,
       return;
    }
 
-   radians                 = M_PI * gl->rotation / 180.0f;
+   /* Game frame is rendered by filter chain, using separated pipeline,
+    * so we can't rotate it in gl3.c. Fortunately, this rot mat controls
+    * game frame rotation, therefore, we can add out orientation on it. */
+   radians                 = M_PI * (gl->rotation + gl->orientation * 90) / 180.0f;
    cosine                  = cosf(radians);
    sine                    = sinf(radians);
    MAT_ELEM_4X4(rot, 0, 0) = cosine;
@@ -1458,20 +1474,23 @@ static void gl3_set_viewport(gl3_t *gl,
       gl->vp.y *= 2;
 #endif
 
-   glViewport(gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height);
-   gl3_set_projection(gl, &gl3_default_ortho, allow_rotate);
+   GL_REORIENTATE
+   (gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height, gl->video_width, gl->video_height, gl->orientation, {
+      glViewport(R_X, R_Y, R_WIDTH, R_HEIGHT);
+      gl3_set_projection(gl, &gl3_default_ortho, allow_rotate);
 
-   /* Set last backbuffer viewport. */
-   if (!force_full)
-   {
-      gl->vp_out_width  = viewport_width;
-      gl->vp_out_height = viewport_height;
-   }
+      /* Set last backbuffer viewport. */
+      if (!force_full)
+      {
+         gl->vp_out_width  = viewport_width;
+         gl->vp_out_height = viewport_height;
+      }
 
-   gl->filter_chain_vp.x = gl->vp.x;
-   gl->filter_chain_vp.y = gl->vp.y;
-   gl->filter_chain_vp.width = gl->vp.width;
-   gl->filter_chain_vp.height = gl->vp.height;
+      gl->filter_chain_vp.x = R_X;
+      gl->filter_chain_vp.y = R_Y;
+      gl->filter_chain_vp.width = R_WIDTH;
+      gl->filter_chain_vp.height = R_HEIGHT;
+   });
 
 #if 0
    RARCH_LOG("Setting viewport @ %ux%u\n", viewport_width, viewport_height);
@@ -1480,8 +1499,20 @@ static void gl3_set_viewport(gl3_t *gl,
 
 static bool gl3_init_pipelines(gl3_t *gl)
 {
-   static const uint32_t alpha_blend_vert[] =
+   static const uint32_t alpha_blend_norm_vert[] =
 #include "vulkan_shaders/alpha_blend.vert.inc"
+      ;
+
+   static const uint32_t alpha_blend_rot90_vert[] =
+#include "vulkan_shaders/alpha_blend_rot90.vert.inc"
+      ;
+
+   static const uint32_t alpha_blend_rot180_vert[] =
+#include "vulkan_shaders/alpha_blend_rot180.vert.inc"
+      ;
+
+   static const uint32_t alpha_blend_rot270_vert[] =
+#include "vulkan_shaders/alpha_blend_rot270.vert.inc"
       ;
 
    static const uint32_t alpha_blend_frag[] =
@@ -1520,47 +1551,79 @@ static bool gl3_init_pipelines(gl3_t *gl)
 #include "vulkan_shaders/pipeline_bokeh.frag.inc"
       ;
 
-   gl->pipelines.alpha_blend = gl3_cross_compile_program(alpha_blend_vert, sizeof(alpha_blend_vert),
+   const uint32_t *alpha_blend_vert = alpha_blend_norm_vert;
+   size_t alpha_blend_vert_size = sizeof(alpha_blend_norm_vert);
+   switch (gl->orientation)
+   {
+      case GL_CORE_ROT_90:
+         alpha_blend_vert = alpha_blend_rot90_vert;
+         alpha_blend_vert_size = sizeof(alpha_blend_rot90_vert);
+         break;
+      case GL_CORE_ROT_180:
+         alpha_blend_vert = alpha_blend_rot180_vert;
+         alpha_blend_vert_size = sizeof(alpha_blend_rot180_vert);
+         break;
+      case GL_CORE_ROT_270:
+         alpha_blend_vert = alpha_blend_rot270_vert;
+         alpha_blend_vert_size = sizeof(alpha_blend_rot270_vert);
+         break;
+   }
+
+   GLuint program = gl->pipelines.alpha_blend;
+   gl->pipelines.alpha_blend = gl3_cross_compile_program(alpha_blend_vert, alpha_blend_vert_size,
                                                              alpha_blend_frag, sizeof(alpha_blend_frag),
                                                              &gl->pipelines.alpha_blend_loc, true);
    if (!gl->pipelines.alpha_blend)
       return false;
+   if (program) glDeleteProgram(program);
 
-   gl->pipelines.font = gl3_cross_compile_program(alpha_blend_vert, sizeof(alpha_blend_vert),
+   program = gl->pipelines.font;
+   gl->pipelines.font = gl3_cross_compile_program(alpha_blend_vert, alpha_blend_vert_size,
                                                       font_frag, sizeof(font_frag),
                                                       &gl->pipelines.font_loc, true);
    if (!gl->pipelines.font)
       return false;
+   if (program) glDeleteProgram(program);
 
+   program = gl->pipelines.ribbon_simple;
    gl->pipelines.ribbon_simple = gl3_cross_compile_program(pipeline_ribbon_simple_vert, sizeof(pipeline_ribbon_simple_vert),
                                                                pipeline_ribbon_simple_frag, sizeof(pipeline_ribbon_simple_frag),
                                                                &gl->pipelines.ribbon_simple_loc, true);
    if (!gl->pipelines.ribbon_simple)
       return false;
+   if (program) glDeleteProgram(program);
 
+   program = gl->pipelines.ribbon;
    gl->pipelines.ribbon = gl3_cross_compile_program(pipeline_ribbon_vert, sizeof(pipeline_ribbon_vert),
                                                         pipeline_ribbon_frag, sizeof(pipeline_ribbon_frag),
                                                         &gl->pipelines.ribbon_loc, true);
    if (!gl->pipelines.ribbon)
       return false;
+   if (program) glDeleteProgram(program);
 
-   gl->pipelines.bokeh = gl3_cross_compile_program(alpha_blend_vert, sizeof(alpha_blend_vert),
+   program = gl->pipelines.bokeh;
+   gl->pipelines.bokeh = gl3_cross_compile_program(alpha_blend_vert, alpha_blend_vert_size,
                                                        pipeline_bokeh_frag, sizeof(pipeline_bokeh_frag),
                                                        &gl->pipelines.bokeh_loc, true);
    if (!gl->pipelines.bokeh)
       return false;
+   if (program) glDeleteProgram(program);
 
-   gl->pipelines.snow_simple = gl3_cross_compile_program(alpha_blend_vert, sizeof(alpha_blend_vert),
+   program = gl->pipelines.snow_simple;
+   gl->pipelines.snow_simple = gl3_cross_compile_program(alpha_blend_vert, alpha_blend_vert_size,
                                                              pipeline_snow_simple_frag, sizeof(pipeline_snow_simple_frag),
                                                              &gl->pipelines.snow_simple_loc, true);
    if (!gl->pipelines.snow_simple)
       return false;
+   if (program) glDeleteProgram(program);
 
-   gl->pipelines.snow = gl3_cross_compile_program(alpha_blend_vert, sizeof(alpha_blend_vert),
+   program = gl->pipelines.snow;
+   gl->pipelines.snow = gl3_cross_compile_program(alpha_blend_vert, alpha_blend_vert_size,
                                                       pipeline_snow_frag, sizeof(pipeline_snow_frag),
                                                       &gl->pipelines.snow_loc, true);
    if (!gl->pipelines.snow)
       return false;
+   if (program) glDeleteProgram(program);
 
    return true;
 }
@@ -1785,6 +1848,9 @@ static void *gl3_init(const video_info_t *video,
    const gfx_ctx_driver_t *ctx_driver   = gl3_get_context(gl);
    struct retro_hw_render_callback *hwr = video_driver_get_hw_context();
 
+   /* init to Norm */
+   gl->orientation = GL_CORE_ROT_NORM;
+
    if (!gl || !ctx_driver)
       goto error;
 
@@ -1905,15 +1971,16 @@ static void *gl3_init(const video_info_t *video,
    temp_height    = mode_height;
 
    /* Get real known video size, which might have been altered by context. */
+   GL_REORIENTATE
+   (0, 0, temp_width, temp_height, 0, 0, gl->orientation, {
+      if (R_WIDTH != 0 && R_HEIGHT != 0)
+         video_driver_set_size(R_WIDTH, R_HEIGHT);
+      video_driver_get_size(&R_WIDTH, &R_HEIGHT);
+      gl->video_width  = R_WIDTH;
+      gl->video_height = R_HEIGHT;
 
-   if (temp_width != 0 && temp_height != 0)
-      video_driver_set_size(temp_width, temp_height);
-   video_driver_get_size(&temp_width, &temp_height);
-   gl->video_width  = temp_width;
-   gl->video_height = temp_height;
-
-   RARCH_LOG("[GLCore]: Using resolution %ux%u.\n", temp_width, temp_height);
-
+      RARCH_LOG("[GLCore]: Using resolution %ux%u.\n", R_WIDTH, R_HEIGHT);
+   });
    /* Set the viewport to fix recording, since it needs to know
     * the viewport sizes before we start running. */
    gl3_set_viewport_wrapper(gl, temp_width, temp_height, false, true);
@@ -2205,9 +2272,12 @@ static bool gl3_alive(void *data)
 
    if (temp_width != 0 && temp_height != 0)
    {
-      video_driver_set_size(temp_width, temp_height);
-      gl->video_width  = temp_width;
-      gl->video_height = temp_height;
+      GL_REORIENTATE
+      (0, 0, temp_width, temp_height, 0, 0, gl->orientation, {
+         video_driver_set_size(R_WIDTH, R_HEIGHT);
+         gl->video_width=R_WIDTH;
+         gl->video_height=R_HEIGHT;
+      });
    }
 
    return ret;
@@ -2303,6 +2373,46 @@ static void gl3_set_rotation(void *data, unsigned rotation)
    gl3_set_projection(gl, &gl3_default_ortho, true);
 }
 
+enum rotation gl3_get_screen_orientation(void *data)
+{
+   gl3_t *gl = (gl3_t*)data;
+   if (!gl)
+      return ORIENTATION_NORMAL;
+
+   switch (gl->orientation)
+   {
+      default:
+      case GL_CORE_ROT_NORM: return ORIENTATION_NORMAL;
+      case GL_CORE_ROT_90: return ORIENTATION_VERTICAL;
+      case GL_CORE_ROT_180: return ORIENTATION_FLIPPED;
+      case GL_CORE_ROT_270: return ORIENTATION_FLIPPED_ROTATED;
+   }
+}
+
+static bool gl3_set_screen_orientation(void *data, enum rotation orientation)
+{
+   gl3_t *gl = (gl3_t*)data;
+
+   if (!gl)
+      return false;
+
+   unsigned int old_orientation = gl->orientation;
+   switch (orientation)
+   {
+      case ORIENTATION_NORMAL: default: gl->orientation = GL_CORE_ROT_NORM; break;
+      case ORIENTATION_VERTICAL:        gl->orientation = GL_CORE_ROT_90; break;
+      case ORIENTATION_FLIPPED:         gl->orientation = GL_CORE_ROT_180; break;
+      case ORIENTATION_FLIPPED_ROTATED: gl->orientation = GL_CORE_ROT_270; break;
+   }
+   if (!gl3_init_pipelines(gl))
+   {
+      RARCH_ERR("[GLCore]: Failed to cross-compile menu pipelines.\n");
+      gl->orientation = old_orientation;
+      return false;
+   }
+   return true;
+}
+
 static void gl3_viewport_info(void *data, struct video_viewport *vp)
 {
    unsigned top_y, top_dist;
@@ -2373,11 +2483,15 @@ static bool gl3_read_viewport(void *data, uint8_t *buffer, bool is_idle)
       if (!is_idle)
          video_driver_cached_frame();
 
+      uint8_t *temp_buffer = malloc(num_pixels * 3 * sizeof(uint8_t));
       video_frame_convert_rgba_to_bgr(
             (const void*)gl->readback_buffer_screenshot,
-            buffer,
+            temp_buffer,
             num_pixels);
 
+      /* rotate the frame buffer to meet viewport size */
+      video_frame_rotate_bgr(temp_buffer, buffer, gl->vp.width, gl->vp.height, gl->orientation);
+      free(temp_buffer);
       free(gl->readback_buffer_screenshot);
       gl->readback_buffer_screenshot = NULL;
    }
@@ -2454,9 +2568,19 @@ static void gl3_draw_menu_texture(gl3_t *gl,
    glBlendEquation(GL_FUNC_ADD);
 
    if (gl->flags & GL3_FLAG_MENU_TEXTURE_FULLSCREEN)
-      glViewport(0, 0, width, height);
+   {
+      GL_REORIENTATE
+      (0, 0, width, height, gl->video_width, gl->video_height, gl->orientation, {
+         glViewport(R_X, R_Y, R_WIDTH, R_HEIGHT);
+      });
+   }
    else
-      glViewport(gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height);
+   {
+      GL_REORIENTATE
+      (gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height, gl->video_width, gl->video_height, gl->orientation, {
+         glViewport(R_X, R_Y, R_WIDTH, R_HEIGHT);
+      });
+   }
 
    glActiveTexture(GL_TEXTURE0 + 1);
    glBindTexture(GL_TEXTURE_2D, gl->menu_texture);
@@ -2583,6 +2707,11 @@ static bool gl3_frame(void *data, const void *frame,
    gl3_filter_chain_set_frame_direction(gl->filter_chain, 1);
 #endif
    gl3_filter_chain_set_rotation(gl->filter_chain, retroarch_get_rotation());
+
+   /* Important!
+    * filter_chain use filter_chain_vp's width and height to determine the output size of
+    * game frame. Therefore we need to tell it if we have flipped the width and height. */
+   gl3_filter_chain_set_videodriver_orientation(gl->filter_chain, gl->orientation);
    gl3_filter_chain_set_input_texture(gl->filter_chain, &texture);
    gl3_filter_chain_build_offscreen_passes(gl->filter_chain,
          &gl->filter_chain_vp);
@@ -2648,10 +2777,14 @@ static bool gl3_frame(void *data, const void *frame,
 #ifndef HAVE_OPENGLES
       glReadBuffer(GL_BACK);
 #endif
-      glReadPixels(gl->vp.x, gl->vp.y,
-            gl->vp.width, gl->vp.height,
-            GL_RGBA, GL_UNSIGNED_BYTE,
-            gl->readback_buffer_screenshot);
+      GL_REORIENTATE
+      (gl->vp.x, gl->vp.y, gl->vp.width, gl->vp.height,
+       gl->video_width, gl->video_height, gl->orientation, {
+         glReadPixels(R_X, R_Y,
+               R_WIDTH, R_HEIGHT,
+               GL_RGBA, GL_UNSIGNED_BYTE,
+               gl->readback_buffer_screenshot);
+      });
    }
    else if (gl->flags & GL3_FLAG_PBO_READBACK_ENABLE)
    {
@@ -2928,10 +3061,16 @@ static void gl3_get_video_output_size(void *data,
       unsigned *width, unsigned *height, char *desc, size_t desc_len)
 {
    gl3_t   *gl = (gl3_t*)data;
+   unsigned temp_width = 0;
+   unsigned temp_height = 0;
    if (gl && gl->ctx_driver && gl->ctx_driver->get_video_output_size)
       gl->ctx_driver->get_video_output_size(
             gl->ctx_data,
-            width, height, desc, desc_len);
+            &temp_width, &temp_height, desc, desc_len);
+   GL_REORIENTATE
+   (0, 0, temp_width, temp_height, 0, 0, gl->orientation, {
+      *width = R_WIDTH; *height = R_HEIGHT;
+   });
 }
 
 static void gl3_get_video_output_prev(void *data)
@@ -3071,6 +3210,8 @@ video_driver_t video_gl3 = {
    gl3_get_poke_interface,
    gl3_wrap_type_to_enum,
 #ifdef HAVE_GFX_WIDGETS
-   gl3_gfx_widgets_enabled
+   gl3_gfx_widgets_enabled,
 #endif
+   gl3_set_screen_orientation,
+   gl3_get_screen_orientation
 };

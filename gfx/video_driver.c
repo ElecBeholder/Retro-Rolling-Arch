@@ -1324,17 +1324,29 @@ const char *video_display_server_get_output_options(void)
 void video_display_server_set_screen_orientation(enum rotation rotation)
 {
    video_driver_state_t *video_st             = &video_driver_st;
+   /* firstly, try using display server to set screen orientation. */
    if (current_display_server && current_display_server->set_screen_orientation)
    {
-      RARCH_LOG("[Video]: Setting screen orientation to %d.\n", rotation);
+      RARCH_LOG("[Video]: Setting display server orientation to %d.\n", rotation);
       video_st->current_screen_orientation    = rotation;
       current_display_server->set_screen_orientation(video_st->current_display_server_data, rotation);
+      return;
+   }
+   /* If not supported, try using video driver to set screen orientation. */
+   if(video_st->current_video && video_st->current_video->set_screen_orientation)
+   {
+      RARCH_LOG("[Video]: Setting video driver orientation to %d.\n", rotation);
+      if (video_st->current_video->set_screen_orientation(video_st->data, rotation))
+         video_st->current_screen_orientation = rotation;
    }
 }
 
 bool video_display_server_can_set_screen_orientation(void)
 {
-   return (current_display_server && current_display_server->set_screen_orientation);
+   video_driver_state_t *video_st             = &video_driver_st;
+   /* check both display server and video driver */
+   return ((current_display_server && current_display_server->set_screen_orientation) ||
+           (video_st->current_video && video_st->current_video->set_screen_orientation));
 }
 
 enum rotation video_display_server_get_screen_orientation(void)
@@ -1343,6 +1355,8 @@ enum rotation video_display_server_get_screen_orientation(void)
    if (current_display_server && current_display_server->get_screen_orientation)
       return current_display_server->get_screen_orientation(
             video_st->current_display_server_data);
+   if (video_st->current_video && video_st->current_video->get_screen_orientation)
+      return video_st->current_video->get_screen_orientation(video_st->data);
    return ORIENTATION_NORMAL;
 }
 

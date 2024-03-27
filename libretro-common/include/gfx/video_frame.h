@@ -197,6 +197,45 @@ static INLINE void video_frame_convert_rgba_to_bgr(
    }
 }
 
+static INLINE void video_frame_rotate_bgr(
+      const void *src_data,
+      void *dst_data,
+      unsigned int dst_width,
+      unsigned int dst_height,
+      unsigned int rotation)
+{
+   unsigned x, y, i;
+   uint8_t *dst;
+   const uint8_t *src = (const uint8_t*)src_data;
+
+   for (i = 0; i < (dst_width * dst_height); i++, src += 3)
+   {
+      switch (rotation)
+      {
+         case 0: default: /* normal */
+            x = i % dst_width;
+            y = (unsigned)(i / dst_width);
+            break;
+         case 1: /* clockwise 90 */
+            x = dst_width-(1 + (unsigned)(i / dst_height));
+            y = i % dst_height;
+            break;
+         case 2: /* clockwise 180 */
+            x = dst_width-(1 + i % dst_width);
+            y = dst_height-(1 + (unsigned)(i / dst_width));
+            break;
+         case 3: /* clockwise 270 */
+            x = (unsigned)(i / dst_height);
+            y = dst_height-(1 + i % dst_height);
+            break;
+      }
+      dst = (uint8_t*)dst_data + (y * dst_width * 3 + x * 3);
+      dst[0] = src[0];
+      dst[1] = src[1];
+      dst[2] = src[2];
+   }
+}
+
 static INLINE bool video_pixel_frame_scale(
       struct scaler_ctx *scaler,
       void *output, const void *data,

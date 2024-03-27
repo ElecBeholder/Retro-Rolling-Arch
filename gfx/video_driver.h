@@ -765,6 +765,10 @@ typedef struct video_driver
     * if set to false, will use OSD as a fallback */
    bool (*gfx_widgets_enabled)(void *data);
 #endif
+   /* Optional. if we can't use the display server to set screen orientation
+    * we can try to use video driver to achieve it. */
+   bool (*set_screen_orientation)(void *data, enum rotation rotation);
+   enum rotation (*get_screen_orientation)(void *data);
 } video_driver_t;
 
 typedef struct

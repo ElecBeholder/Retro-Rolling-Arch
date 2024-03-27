@@ -79,7 +79,7 @@ static void gl3_framebuffer_copy(
    glUseProgram(quad_program);
    if (flat_ubo_vertex >= 0)
    {
-      static float mvp[16] = { 
+      static float mvp[16] = {
                                 2.0f, 0.0f, 0.0f, 0.0f,
                                 0.0f, 2.0f, 0.0f, 0.0f,
                                 0.0f, 0.0f, 2.0f, 0.0f,
@@ -111,7 +111,7 @@ static void gl3_framebuffer_copy(
 
 static void gl3_framebuffer_copy_partial(
       GLuint fb_id,
-      GLuint quad_program, 
+      GLuint quad_program,
       GLint flat_ubo_vertex,
       struct Size2D size,
       GLuint image,
@@ -138,7 +138,7 @@ static void gl3_framebuffer_copy_partial(
    glUseProgram(quad_program);
    if (flat_ubo_vertex >= 0)
    {
-      static float mvp[16] = { 
+      static float mvp[16] = {
                                 2.0f, 0.0f, 0.0f, 0.0f,
                                 0.0f, 2.0f, 0.0f, 0.0f,
                                 0.0f, 0.0f, 2.0f, 0.0f,
@@ -213,7 +213,7 @@ static uint32_t gl3_get_cross_compiler_target_version(void)
 #ifdef HAVE_OPENGLES3
    if (!version || sscanf(version, "OpenGL ES %u.%u", &major, &minor) != 2)
       return 300;
-   
+
    if (major == 2 && minor == 0)
       return 100;
 #else
@@ -925,6 +925,11 @@ public:
       rotation = rot;
    }
 
+   void set_video_driver_orientation(uint32_t orientation)
+   {
+      video_driver_orientation = orientation;
+   }
+
    void set_name(const char *name)
    {
       pass_name = name;
@@ -1023,6 +1028,7 @@ private:
    unsigned frame_count_period = 0;
    int32_t frame_direction = 1;
    uint32_t rotation = 0;
+   uint32_t video_driver_orientation = 0;
    unsigned pass_number = 0;
 
    size_t ubo_offset = 0;
@@ -1263,7 +1269,8 @@ Size2D Pass::get_output_size(const Size2D &original,
          break;
 
       case GLSLANG_FILTER_CHAIN_SCALE_VIEWPORT:
-         width = (retroarch_get_rotation() % 2 ? current_viewport.height : current_viewport.width) * pass_info.scale_x;
+         width = ((retroarch_get_rotation() + video_driver_orientation) % 2 ?
+             current_viewport.height : current_viewport.width) * pass_info.scale_x;
          break;
 
       case GLSLANG_FILTER_CHAIN_SCALE_ABSOLUTE:
@@ -1285,7 +1292,8 @@ Size2D Pass::get_output_size(const Size2D &original,
          break;
 
       case GLSLANG_FILTER_CHAIN_SCALE_VIEWPORT:
-         height = (retroarch_get_rotation() % 2 ? current_viewport.width : current_viewport.height) * pass_info.scale_y;
+         height = ((retroarch_get_rotation() + video_driver_orientation) % 2 ?
+             current_viewport.width : current_viewport.height) * pass_info.scale_y;
          break;
 
       case GLSLANG_FILTER_CHAIN_SCALE_ABSOLUTE:
@@ -1336,7 +1344,7 @@ void Pass::build_semantic_vec4(uint8_t *data, slang_semantic semantic,
 
    if (refl->push_constant)
    {
-      if (  refl->location.push_vertex   >= 0 || 
+      if (  refl->location.push_vertex   >= 0 ||
             refl->location.push_fragment >= 0)
       {
          float v4[4];
@@ -1644,8 +1652,8 @@ void Pass::build_semantics(uint8_t *buffer,
                        unsigned(current_viewport.height));
 
    build_semantic_uint(buffer, SLANG_SEMANTIC_FRAME_COUNT,
-                       frame_count_period 
-                       ? uint32_t(frame_count % frame_count_period) 
+                       frame_count_period
+                       ? uint32_t(frame_count % frame_count_period)
                        : uint32_t(frame_count));
 
    build_semantic_int(buffer, SLANG_SEMANTIC_FRAME_DIRECTION,
@@ -1736,7 +1744,7 @@ void Pass::build_commands(
                    GLsizei((reflection.push_constant_size + 15) / 16),
                    reinterpret_cast<const float *>(push_constant_buffer.data()));
 
-   if (!(      locations.buffer_index_ubo_vertex   == GL_INVALID_INDEX 
+   if (!(      locations.buffer_index_ubo_vertex   == GL_INVALID_INDEX
             && locations.buffer_index_ubo_fragment == GL_INVALID_INDEX))
    {
       /* UBO Ring - update and bind */
@@ -1849,6 +1857,7 @@ public:
    void set_frame_count_period(unsigned pass, unsigned period);
    void set_frame_direction(int32_t direction);
    void set_rotation(uint32_t rot);
+   void set_video_driver_orientation(uint32_t orientation);
    void set_pass_name(unsigned pass, const char *name);
 
    void add_static_texture(std::unique_ptr<gl3_shader::StaticTexture> texture);
@@ -1925,7 +1934,7 @@ void gl3_filter_chain::build_offscreen_passes(const gl3_viewport &vp)
 {
    unsigned i;
 
-   /* First frame, make sure our history and feedback textures 
+   /* First frame, make sure our history and feedback textures
     * are in a clean state. */
    if (require_clear)
    {
@@ -1977,7 +1986,7 @@ void gl3_filter_chain::end_frame()
 
       if (input_texture.width      != tmp->get_size().width  ||
             input_texture.height     != tmp->get_size().height ||
-            (input_texture.format    != 0 
+            (input_texture.format    != 0
              && input_texture.format != tmp->get_format()))
          tmp->set_size({ input_texture.width, input_texture.height }, input_texture.format);
 
@@ -2000,7 +2009,7 @@ void gl3_filter_chain::build_viewport_pass(
       const gl3_viewport &vp, const float *mvp)
 {
    unsigned i;
-   /* First frame, make sure our history and 
+   /* First frame, make sure our history and
     * feedback textures are in a clean state. */
    if (require_clear)
    {
@@ -2132,7 +2141,7 @@ bool gl3_filter_chain::init_feedback()
 bool gl3_filter_chain::init_alias()
 {
    int i;
-    
+
    common.texture_semantic_map.clear();
    common.texture_semantic_uniform_map.clear();
 
@@ -2299,9 +2308,9 @@ void gl3_filter_chain::set_input_texture(
                common.quad_loc.flat_ubo_vertex,
                copy_framebuffer->get_size(),
                input_texture.image,
-               float(input_texture.width) 
+               float(input_texture.width)
                / input_texture.padded_width,
-               float(input_texture.height) 
+               float(input_texture.height)
                / input_texture.padded_height);
       input_texture.image = copy_framebuffer->get_image();
    }
@@ -2336,6 +2345,13 @@ void gl3_filter_chain::set_rotation(uint32_t rot)
    unsigned i;
    for (i = 0; i < passes.size(); i++)
       passes[i]->set_rotation(rot);
+}
+
+void gl3_filter_chain::set_video_driver_orientation(uint32_t orientation)
+{
+   unsigned i;
+   for (i = 0; i < passes.size(); i++)
+      passes[i]->set_video_driver_orientation(orientation);
 }
 
 void gl3_filter_chain::set_pass_name(unsigned pass, const char *name)
@@ -2458,7 +2474,7 @@ gl3_filter_chain_t *gl3_filter_chain_create_from_preset(
    if (!chain)
       return nullptr;
 
-   if (      shader->luts 
+   if (      shader->luts
          && !gl3_filter_chain_load_luts(chain.get(), shader.get()))
       return nullptr;
 
@@ -2557,8 +2573,8 @@ gl3_filter_chain_t *gl3_filter_chain_create_from_preset(
       else
       {
          pass_info.source_filter =
-            pass->filter == RARCH_FILTER_LINEAR 
-            ? GLSLANG_FILTER_CHAIN_LINEAR 
+            pass->filter == RARCH_FILTER_LINEAR
+            ? GLSLANG_FILTER_CHAIN_LINEAR
             : GLSLANG_FILTER_CHAIN_NEAREST;
       }
       pass_info.address       = rarch_wrap_to_address(pass->wrap);
@@ -2572,7 +2588,7 @@ gl3_filter_chain_t *gl3_filter_chain_create_from_preset(
          pass_info.max_levels = ~0u;
 
       pass_info.mip_filter    = pass->filter != RARCH_FILTER_NEAREST && pass_info.max_levels > 1
-         ? GLSLANG_FILTER_CHAIN_LINEAR 
+         ? GLSLANG_FILTER_CHAIN_LINEAR
          : GLSLANG_FILTER_CHAIN_NEAREST;
 
       bool explicit_format = output.meta.rt_format != SLANG_FORMAT_UNKNOWN;
@@ -2756,6 +2772,13 @@ void gl3_filter_chain_set_rotation(
       uint32_t rot)
 {
    chain->set_rotation(rot);
+}
+
+void gl3_filter_chain_set_videodriver_orientation(
+      gl3_filter_chain_t *chain,
+      uint32_t orientation)
+{
+   chain->set_video_driver_orientation(orientation);
 }
 
 void gl3_filter_chain_set_frame_count_period(
