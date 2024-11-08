@@ -9,6 +9,8 @@ These programs are instantiated as dynamic libraries. We refer to these as "libr
 
 A simple implementation of screen orientation setting for Retroarch KMS/DRM mode. Currently, only work with gl3(glcore) video driver.
 
+![on_clockwork](docs/on_clockwork.JPG "on Clockwork")
+
 ![XMB menu driver](docs/XMB-main-menu.jpg "XMB menu driver")
 
 ![rgui menu driver](docs/rgui-main-menu.jpg "rgui menu driver")
